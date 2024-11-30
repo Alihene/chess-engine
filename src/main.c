@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <limits.h>
+#include <math.h>
 
 typedef int8_t i8;
 typedef int16_t i16;
@@ -39,6 +40,8 @@ typedef struct {
     struct {
         u32 x, y;
     } from, to;
+
+    bool capture;
 } Move;
 
 #define COLOR_WHITE 0
@@ -47,12 +50,17 @@ typedef struct {
 typedef struct {
     Piece pieces[64];
     u64 pieces_state;
+
+    struct {
+        u32 x, y;
+    } white_king_pos, black_king_pos;
 } Board;
 
 Board board = {0};
 Board search_board = {0};
 
 u32 minimax_count = 0;
+Move best_move;
 
 Piece *get_piece(u32 x, u32 y, Board *b) {
     u32 index = x + y * 8;
@@ -69,6 +77,16 @@ Piece *get_piece(u32 x, u32 y, Board *b) {
 void set_piece(u32 x, u32 y, const Piece *piece, Board *b) {
     b->pieces[x + y * 8] = *piece;
     b->pieces_state |= (1L << (x + y * 8));
+
+    if(piece->type == KING) {
+        if(piece->color == COLOR_WHITE) {
+            b->white_king_pos.x = x;
+            b->white_king_pos.y = y;
+        } else {
+            b->black_king_pos.x = x;
+            b->black_king_pos.y = y;
+        }
+    }
 }
 
 void setup_board(Board *b) {
@@ -115,36 +133,42 @@ i32 evaluate_board(Board *b) {
     i32 white = 0;
     i32 black = 0;
 
-    for(u32 x = 0; x < 8; x++) {
-        for(u32 y = 0; y < 8; y++) {
+    for(i32 x = 0; x < 8; x++) {
+        for(i32 y = 0; y < 8; y++) {
             Piece *piece = get_piece(x, y, b);
             if(piece) {
-                i32 value;
+                i32 value = 0;
                 switch(piece->type) {
                     case KING:
                     {
-                        value = 4;
+                        value = 2000;
                         break;
                     }
                     case PAWN:
                     {
-                        value = 1;
+                        value = 100;
+                        value += (i32)(8 - fabsf(3.5f - x)) * 8;
+                        value += (i32)(8 - fabsf(3.5f - y)) * 8;
                         break;
                     }
                     case BISHOP:
                     case KNIGHT:
                     {
-                        value = 3;
+                        value = 300;
+                        value += (i32)(8 - fabsf(3.5f - x)) * 6;
+                        value += (i32)(8 - fabsf(3.5f - y)) * 6;
                         break;
                     }
                     case ROOK:
                     {
-                        value = 5;
+                        value = 500;
                         break;
                     }
                     case QUEEN:
                     {
-                        value = 9;
+                        value = 900;
+                        value += (i32)(8 - fabsf(3.5f - x)) * 5;
+                        value += (i32)(8 - fabsf(3.5f - y)) * 5;
                         break;
                     }
                     default:
@@ -163,7 +187,8 @@ i32 evaluate_board(Board *b) {
         }
     }
 
-    return white - black;
+    i32 piece_eval = (white - black);
+    return piece_eval;
 }
 
 char piece_to_char(const Piece *piece) {
@@ -263,12 +288,18 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
     move.from.y = y;
     move.to.x = x;
     move.to.y = y;
+    move.capture = false;
     switch(piece->type) {
         case KING:
         {
             // Left
             if(x > 0 && !(get_piece(x - 1, y, b) && get_piece(x - 1, y, b)->color == color_to_move)) {
                 move.to.x = x - 1;
+                if(get_piece(x - 1, y, b) && get_piece(x - 1, y, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -277,6 +308,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             if(x > 0 && y < 7 && !(get_piece(x - 1, y + 1, b) && get_piece(x - 1, y + 1, b)->color == color_to_move)) {
                 move.to.x = x - 1;
                 move.to.y = y + 1;
+                if(get_piece(x - 1, y + 1, b) && get_piece(x - 1, y + 1, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -284,6 +320,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             // Top
             if(y < 7 && !(get_piece(x, y + 1, b) && get_piece(x, y + 1, b)->color == color_to_move)) {
                 move.to.y = y + 1;
+                if(get_piece(x, y + 1, b) && get_piece(x, y + 1, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -292,6 +333,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             if(x < 7 && y < 7 && !(get_piece(x + 1, y + 1, b) && get_piece(x + 1, y + 1, b)->color == color_to_move)) {
                 move.to.x = x + 1;
                 move.to.y = y + 1;
+                if(get_piece(x + 1, y + 1, b) && get_piece(x + 1, y + 1, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -299,6 +345,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             // Right
             if(x < 7 && !(get_piece(x + 1, y, b) && get_piece(x + 1, y, b)->color == color_to_move)) {
                 move.to.x = x + 1;
+                if(get_piece(x + 1, y, b) && get_piece(x + 1, y, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -307,6 +358,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             if(x < 7 && y > 0 && !(get_piece(x + 1, y - 1, b) && get_piece(x + 1, y - 1, b)->color == color_to_move)) {
                 move.to.x = x + 1;
                 move.to.y = y - 1;
+                if(get_piece(x + 1, y - 1, b) && get_piece(x + 1, y - 1, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -314,6 +370,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             // Bottom
             if(y > 0 && !(get_piece(x, y - 1, b) && get_piece(x, y - 1, b)->color == color_to_move)) {
                 move.to.y = y - 1;
+                if(get_piece(x, y - 1, b) && get_piece(x, y - 1, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -322,6 +383,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             if(x > 0 && y > 0 && !(get_piece(x - 1, y - 1, b) && get_piece(x - 1, y - 1, b)->color == color_to_move)) {
                 move.to.x = x - 1;
                 move.to.y = y - 1;
+                if(get_piece(x - 1, y - 1, b) && get_piece(x - 1, y - 1, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -351,6 +417,7 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
                     && get_piece(x + 1, y + 1, b)->color != color_to_move) {
                     move.to.x = x + 1;
                     move.to.y = y + 1;
+                    move.capture = true;
                     moves[i] = move;
                     i++;
                 }
@@ -360,9 +427,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
                     && get_piece(x - 1, y + 1, b)->color != color_to_move) {
                     move.to.x = x - 1;
                     move.to.y = y + 1;
+                    move.capture = true;
                     moves[i] = move;
                     i++;
                 }
+                move.capture = false;
             } else {
                 // One square
                 if(y > 0 && !get_piece(x, y - 1, b)) {
@@ -385,6 +454,7 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
                     && get_piece(x + 1, y - 1, b)->color != color_to_move) {
                     move.to.x = x + 1;
                     move.to.y = y - 1;
+                    move.capture = true;
                     moves[i] = move;
                     i++;
                 }
@@ -394,9 +464,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
                     && get_piece(x - 1, y - 1, b)->color != color_to_move) {
                     move.to.x = x - 1;
                     move.to.y = y - 1;
+                    move.capture = true;
                     moves[i] = move;
                     i++;
                 }
+                move.capture = false;
             }
             break;
         }
@@ -405,6 +477,7 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             // Top left
             u32 x1 = x;
             u32 y1 = y;
+            move.capture = false;
             while(x1 > 0 && y1 < 7) {
                 x1--;
                 y1++;
@@ -414,6 +487,7 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
                 } else if(next_piece && next_piece->color != color_to_move) {
                     move.to.x = x1;
                     move.to.y = y1;
+                    move.capture = true;
                     moves[i] = move;
                     i++;
                     break;
@@ -428,6 +502,7 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             // Top right
             x1 = x;
             y1 = y;
+            move.capture = false;
             while(x1 < 7 && y1 < 7) {
                 x1++;
                 y1++;
@@ -437,6 +512,7 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
                 } else if(next_piece && next_piece->color != color_to_move) {
                     move.to.x = x1;
                     move.to.y = y1;
+                    move.capture = true;
                     moves[i] = move;
                     i++;
                     break;
@@ -451,6 +527,7 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             // Bottom right
             x1 = x;
             y1 = y;
+            move.capture = false;
             while(x1 < 7 && y1 > 0) {
                 x1++;
                 y1--;
@@ -460,6 +537,7 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
                 } else if(next_piece && next_piece->color != color_to_move) {
                     move.to.x = x1;
                     move.to.y = y1;
+                    move.capture = true;
                     moves[i] = move;
                     i++;
                     break;
@@ -474,6 +552,7 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             // Bottom left
             x1 = x;
             y1 = y;
+            move.capture = false;
             while(x1 > 0 && y1 > 0) {
                 x1--;
                 y1--;
@@ -483,6 +562,7 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
                 } else if(next_piece && next_piece->color != color_to_move) {
                     move.to.x = x1;
                     move.to.y = y1;
+                    move.capture = true;
                     moves[i] = move;
                     i++;
                     break;
@@ -501,6 +581,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             if(x > 1 && y > 0 && !(get_piece(x - 2, y - 1, b) && get_piece(x - 2, y - 1, b)->color == color_to_move)) {
                 move.to.x = x - 2;
                 move.to.y = y - 1;
+                if(get_piece(x - 2, y - 1, b) && get_piece(x - 2, y - 1, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -508,6 +593,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             if(x > 1 && y < 7 && !(get_piece(x - 2, y + 1, b) && get_piece(x - 2, y + 1, b)->color == color_to_move)) {
                 move.to.x = x - 2;
                 move.to.y = y + 1;
+                if(get_piece(x - 2, y + 1, b) && get_piece(x - 2, y + 1, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -515,6 +605,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             if(x > 0 && y < 6 && !(get_piece(x - 1, y + 2, b) && get_piece(x - 1, y + 2, b)->color == color_to_move)) {
                 move.to.x = x - 1;
                 move.to.y = y + 2;
+                if(get_piece(x - 1, y + 2, b) && get_piece(x - 1, y + 2, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -522,6 +617,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             if(x < 7 && y < 6 && !(get_piece(x + 1, y + 2, b) && get_piece(x + 1, y + 2, b)->color == color_to_move)) {
                 move.to.x = x + 1;
                 move.to.y = y + 2;
+                if(get_piece(x + 1, y + 2, b) && get_piece(x + 1, y + 2, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -529,6 +629,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             if(x < 6 && y < 7 && !(get_piece(x + 2, y + 1, b) && get_piece(x + 2, y + 1, b)->color == color_to_move)) {
                 move.to.x = x + 2;
                 move.to.y = y + 1;
+                if(get_piece(x + 2, y + 1, b) && get_piece(x + 2, y + 1, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -536,6 +641,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             if(x < 6 && y > 0 && !(get_piece(x + 2, y - 1, b) && get_piece(x + 2, y - 1, b)->color == color_to_move)) {
                 move.to.x = x + 2;
                 move.to.y = y - 1;
+                if(get_piece(x + 2, y - 1, b) && get_piece(x + 2, y - 1, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -543,6 +653,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             if(x < 7 && y > 1 && !(get_piece(x + 1, y - 2, b) && get_piece(x + 1, y - 2, b)->color == color_to_move)) {
                 move.to.x = x + 1;
                 move.to.y = y - 2;
+                if(get_piece(x + 1, y - 2, b) && get_piece(x + 1, y - 2, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -550,6 +665,11 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
             if(x > 0 && y > 1 && !(get_piece(x - 1, y - 2, b) && get_piece(x - 1, y - 2, b)->color == color_to_move)) {
                 move.to.x = x - 1;
                 move.to.y = y - 2;
+                if(get_piece(x - 1, y - 2, b) && get_piece(x - 1, y - 2, b)->color != color_to_move) {
+                    move.capture = true;
+                } else {
+                    move.capture = false;
+                }
                 moves[i] = move;
                 i++;
             }
@@ -830,7 +950,7 @@ void generate_moves_for_piece(u32 x, u32 y, u32 color_to_move, Board *b, Move *m
 
 // out_moves must be size 256
 Move *generate_moves(i32 color_to_move, u32 *count, Board *b) {
-    // TODO: bump allocator?
+    // TODO: custom allocator
     Move *out_moves = malloc(256 * sizeof(Move));
     if(!out_moves) {
         fprintf(stderr, "Failed to allocate 256 move buffer\n");
@@ -854,7 +974,39 @@ Move *generate_moves(i32 color_to_move, u32 *count, Board *b) {
     return out_moves;
 }
 
-i32 minimax(Board *b, i32 depth, i32 alpha, i32 beta, i32 who_to_move) {
+// Check if side with specified color in check
+bool is_in_check(u32 color, Board *b) {
+    Move moves[256];
+
+    for(u32 x = 0; x < 8; x++) {
+        for(u32 y = 0; y < 8; y++) {
+            Piece *piece = get_piece(x, y, b);
+            if(piece && piece->color != color) {
+                u32 move_count = 0;
+                generate_moves_for_piece(x, y, piece->color, b, moves, &move_count);
+
+                for(u32 i = 0; i < move_count; i++) {
+                    Move *m = &moves[i];
+                    if(color == COLOR_WHITE) {
+                        if(m->to.x == b->white_king_pos.x
+                            && m->to.y == b->white_king_pos.y) {
+                            return true;
+                        }
+                    } else {
+                        if(m->to.x == b->black_king_pos.x
+                            && m->to.y == b->black_king_pos.y) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+i32 minimax(Board *b, i32 depth, i32 ply_from_root, i32 alpha, i32 beta, i32 who_to_move) {
     minimax_count++;
 
     if(depth == 0) {
@@ -862,9 +1014,90 @@ i32 minimax(Board *b, i32 depth, i32 alpha, i32 beta, i32 who_to_move) {
     }
 
     u32 move_count = 0;
+    Move *minimax_moves = generate_moves(who_to_move, &move_count, b);
+
+    u32 moves_to_remove[256];
+    u32 moves_to_remove_counter = 0;
+
+    for(i32 i = move_count - 1; i >= 0; i--) {
+        Piece *p = get_piece(minimax_moves[i].to.x, minimax_moves[i].to.y, b);
+        bool piece_exists = p != NULL;
+        Piece p_copy;
+        if(p) {
+            p_copy = *p;
+        }
+        move_piece(
+            minimax_moves[i].from.x,
+            minimax_moves[i].from.y,
+            minimax_moves[i].to.x,
+            minimax_moves[i].to.y,
+            b);
+        if(is_in_check(who_to_move, b)) {
+            // Can't make a move that results in check of your king!
+            moves_to_remove[moves_to_remove_counter] = i;
+            moves_to_remove_counter++;
+        }
+        move_piece(
+            minimax_moves[i].to.x,
+            minimax_moves[i].to.y,
+            minimax_moves[i].from.x,
+            minimax_moves[i].from.y,
+            b);
+        if(piece_exists) {
+            set_piece(minimax_moves[i].to.x, minimax_moves[i].to.y, &p_copy, b);
+        }
+    }
+
+    for(u32 i = 0; i < moves_to_remove_counter; i++) {
+        for(u32 j = moves_to_remove[i]; j < move_count - 1; j++) {
+            minimax_moves[j] = minimax_moves[j + 1];
+        }
+        move_count--;
+    }
+
+    // Check capture moves first
+    u32 move_scores[256];
+    for(u32 i = 0; i < move_count; i++) {
+        if(minimax_moves[i].capture) {
+            move_scores[i] = 5;
+        } else {
+            move_scores[i] = 1;
+        }
+    }
+
+    // Bubble sort
+    for(i32 i = 0; i < move_count; i++) {
+        u32 swaps = 0;
+        for(i32 j = 0; j < move_count - i - 1; j++) {
+            if(move_scores[j] < move_scores[j + 1]) {
+                Move temp = minimax_moves[j];
+                minimax_moves[j] = minimax_moves[j + 1];
+                minimax_moves[j + 1] = temp;
+
+                u32 temp_score = move_scores[j];
+                move_scores[j] = move_scores[j + 1];
+                move_scores[j + 1] = temp_score;
+
+                swaps = 1;
+            }
+        }
+
+        if(!swaps) {
+            break;
+        }
+    }
+
+    bool in_check = is_in_check(who_to_move, b);
+    if(move_count == 0 && in_check) {
+        free(minimax_moves);
+        return who_to_move == COLOR_WHITE ? INT_MIN : INT_MAX;
+    } else if(move_count == 0 && !in_check) {
+        free(minimax_moves);
+        return 0;
+    }
+
     if(who_to_move == COLOR_WHITE) {
         i32 max_eval = INT_MIN;
-        Move *minimax_moves = generate_moves(who_to_move, &move_count, b);
         for(u32 i = 0; i < move_count; i++) {
             Piece *p = get_piece(minimax_moves[i].to.x, minimax_moves[i].to.y, b);
             bool piece_exists = p;
@@ -878,7 +1111,10 @@ i32 minimax(Board *b, i32 depth, i32 alpha, i32 beta, i32 who_to_move) {
                 minimax_moves[i].to.x,
                 minimax_moves[i].to.y,
                 b);
-            i32 eval = minimax(b, depth - 1, alpha, beta, COLOR_BLACK);
+            i32 eval = minimax(b, depth - 1, ply_from_root + 1, alpha, beta, COLOR_BLACK);
+            if(eval > max_eval && ply_from_root == 0) {
+                best_move = minimax_moves[i];
+            }
             max_eval = MAX(max_eval, eval);
             move_piece(
                 minimax_moves[i].to.x,
@@ -898,7 +1134,6 @@ i32 minimax(Board *b, i32 depth, i32 alpha, i32 beta, i32 who_to_move) {
         return max_eval;
     } else {
         i32 min_eval = INT_MAX;
-        Move *minimax_moves = generate_moves(who_to_move, &move_count, b);
         for(u32 i = 0; i < move_count; i++) {
             Piece *p = get_piece(minimax_moves[i].to.x, minimax_moves[i].to.y, b);
             bool piece_exists = p;
@@ -912,7 +1147,10 @@ i32 minimax(Board *b, i32 depth, i32 alpha, i32 beta, i32 who_to_move) {
                 minimax_moves[i].to.x,
                 minimax_moves[i].to.y,
                 b);
-            i32 eval = minimax(b, depth - 1, alpha, beta, COLOR_WHITE);
+            i32 eval = minimax(b, depth - 1, ply_from_root + 1, alpha, beta, COLOR_WHITE);
+            if(eval < min_eval && ply_from_root == 0) {
+                best_move = minimax_moves[i];
+            }
             min_eval = MIN(min_eval, eval);
             move_piece(
                 minimax_moves[i].to.x,
@@ -937,10 +1175,15 @@ int main() {
     setup_board(&board);
     memcpy(&search_board, &board, sizeof(board));
 
-    i32 eval = minimax(&search_board, 6, INT_MIN, INT_MAX, COLOR_WHITE);
-    printf("Eval: %i\n", eval);
-    printf("Number of minimax calls: %u\n", minimax_count);
+    for(u32 i = 0; i < 50; i++) {
+        minimax(&search_board, 6, 0, INT_MIN, INT_MAX, i % 2);
+        move_piece(best_move.from.x, best_move.from.y, best_move.to.x, best_move.to.y, &board);
+        memcpy(&search_board, &board, sizeof(board));
+        printf("Half move %u\n", i + 1);
+        printf("Evaluated %u positions\n", minimax_count);
+        minimax_count = 0;
+        print_board(&board);
+    }
 
-    print_board(&board);
     return 0;
 }

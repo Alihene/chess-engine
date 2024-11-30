@@ -3,8 +3,8 @@ Experimental chess engine written in C
 
 ## Goals
 - [x] Terminal board representation
-- [ ] Move generation and evaluation
-- [ ] Positional evaluation
+- [x] Move generation and evaluation
+- [x] Positional evaluation
 - [ ] Modifiable evaluation algorithm
 - [ ] Graphical board representation
 - [ ] FEN and PGN parsing
